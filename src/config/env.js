@@ -15,6 +15,8 @@ const envSchema = z
     FIREBASE_PROJECT_ID: z.string().trim().optional(),
     FIREBASE_CLIENT_EMAIL: z.string().trim().optional(),
     FIREBASE_PRIVATE_KEY: z.string().optional(),
+    ACCESS_TOKEN_SECRET: z.string().trim().min(16).default("development-access-token-secret"),
+    ACCESS_TOKEN_EXPIRES_IN: z.string().trim().min(1).default("1h"),
   })
   .superRefine((value, context) => {
     if (value.NODE_ENV === "production" && !value.MONGODB_URI) {
@@ -24,7 +26,16 @@ const envSchema = z
         message: "MONGODB_URI is required in production.",
       });
     }
+    if (value.NODE_ENV === "production" && !sourceHasProductionSecret(value.ACCESS_TOKEN_SECRET)) {
+      context.addIssue({
+        code: "custom",
+        path: ["ACCESS_TOKEN_SECRET"],
+        message: "ACCESS_TOKEN_SECRET must be set to a strong production secret.",
+      });
+    }
   });
+
+const sourceHasProductionSecret = (secret) => secret !== "development-access-token-secret";
 
 export const parseEnv = (source = process.env) => {
   const parsed = envSchema.safeParse(source);
@@ -53,6 +64,8 @@ export const parseEnv = (source = process.env) => {
     firebaseProjectId: parsed.data.FIREBASE_PROJECT_ID,
     firebaseClientEmail: parsed.data.FIREBASE_CLIENT_EMAIL,
     firebasePrivateKey: parsed.data.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
+    accessTokenSecret: parsed.data.ACCESS_TOKEN_SECRET,
+    accessTokenExpiresIn: parsed.data.ACCESS_TOKEN_EXPIRES_IN,
   };
 };
 

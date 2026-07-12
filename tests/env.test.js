@@ -23,4 +23,14 @@ describe("environment parsing", () => {
       }),
     ).toThrow("MONGODB_URI is required in production");
   });
+
+  it("requires an explicit access-token secret in production", () => {
+    expect(() =>
+      parseEnv({
+        NODE_ENV: "production",
+        CLIENT_ORIGIN: "https://example.com",
+        MONGODB_URI: "mongodb://localhost:27017",
+      }),
+    ).toThrow("ACCESS_TOKEN_SECRET must be set");
+  });
 });

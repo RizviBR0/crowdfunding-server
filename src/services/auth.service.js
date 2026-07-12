@@ -7,7 +7,7 @@ const ROLE_GRANTS = {
 
 const normalizeEmail = (email) => email.trim().toLowerCase();
 
-const publicUser = (user) => ({
+export const publicUser = (user) => ({
   id: user._id?.toString(),
   firebaseUid: user.firebaseUid,
   displayName: user.displayName,
@@ -125,6 +125,10 @@ export const exchangeFirebaseSession = async ({
     if (existingUser) {
       if (existingUser.firebaseUid && existingUser.firebaseUid !== decodedToken.uid) {
         throw new ApiError(409, "AUTH_IDENTITY_CONFLICT", "This email is already linked to another identity.");
+      }
+
+      if (existingUser.status !== "active") {
+        throw new ApiError(401, "USER_NOT_ACTIVE", "Authenticated user is not active.");
       }
 
       if (!existingUser.firebaseUid) {

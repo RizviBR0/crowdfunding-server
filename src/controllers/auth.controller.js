@@ -3,6 +3,7 @@ import { env } from "../config/env.js";
 import { getFirebaseAuth } from "../config/firebaseAdmin.js";
 import { asyncHandler } from "../middleware/asyncHandler.js";
 import { exchangeFirebaseSession } from "../services/auth.service.js";
+import { signAccessToken } from "../services/token.service.js";
 import { sendSuccess } from "../utils/apiResponse.js";
 
 export const createSession = asyncHandler(async (request, response) => {
@@ -19,6 +20,13 @@ export const createSession = asyncHandler(async (request, response) => {
   });
 
   sendSuccess(response, result.isNewUser ? 201 : 200, {
+    accessToken: signAccessToken({ user: result.user, config }),
     user: result.user,
+  });
+});
+
+export const getCurrentUser = asyncHandler(async (request, response) => {
+  sendSuccess(response, 200, {
+    user: request.user,
   });
 });
