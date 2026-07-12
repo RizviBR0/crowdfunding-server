@@ -51,6 +51,14 @@ const toCreatorCampaign = (campaign) => ({
   deletedAt: campaign.deletedAt ?? null,
 });
 
+const toAdminCampaign = (campaign) => ({
+  ...toCreatorCampaign(campaign),
+  creatorId: campaign.creatorId?.toString?.() ?? campaign.creatorId,
+  moderation: campaign.moderation ?? null,
+});
+
+const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 const assertFutureDeadline = (deadline, now) => {
   if (deadline.getTime() <= now.getTime()) {
     throw new ApiError(400, "DEADLINE_IN_PAST", "Campaign deadline must be in the future.");
@@ -93,6 +101,146 @@ const createRefundLedger = ({ contribution, campaign, now, balanceAfter }) => ({
     previousContributionStatus: contribution.status,
   },
 });
+
+const createCampaignDecisionNotification = ({ campaign, decision, reason, now }) => ({
+  type: "campaign_decision",
+  message:
+    decision === "approved"
+      ? `Your campaign "${campaign.title}" was approved by FundBloom admin.`
+      : `Your campaign "${campaign.title}" was rejected by FundBloom admin.`,
+  toUserId: campaign.creatorId,
+  toEmail: campaign.creatorEmail,
+  actionRoute: "/dashboard/creator/campaigns",
+  relatedEntity: { type: "campaign", id: campaign._id },
+  eventKey: `campaign-decision:${campaign._id.toString()}:${decision}`,
+  readAt: null,
+  time: now,
+  metadata: {
+    decision,
+    reason: reason ?? "",
+  },
+});
+
+const getCampaignForAdmin = async ({ campaigns, campaignId, session }) => {
+  const campaign = await campaigns.findOne(
+    { _id: objectIdOrString(campaignId) },
+    session ? { session } : undefined,
+  );
+
+  if (!campaign) {
+    throw new ApiError(404, "CAMPAIGN_NOT_FOUND", "Campaign was not found.");
+  }
+
+  if (campaign.status === "deleted") {
+    throw new ApiError(409, "CAMPAIGN_ALREADY_DELETED", "Campaign has already been deleted.");
+  }
+
+  return campaign;
+};
+
+const softDeleteCampaignWithRefunds = async ({ database, campaign, now, moderation, session }) => {
+  const sessionOption = session ? { session } : undefined;
+  const campaigns = database.collection("campaigns");
+  const contributions = database.collection("contributions");
+  const users = database.collection("users");
+  const ledger = database.collection("creditTransactions");
+  const refundableContributions = await contributions
+    .find(
+      {
+        campaignId: campaign._id,
+        status: { $in: REFUNDABLE_CONTRIBUTION_STATUSES },
+      },
+      sessionOption,
+    )
+    .toArray();
+
+  let refundedCredits = 0;
+
+  for (const contribution of refundableContributions) {
+    const contributionUpdate = await contributions.updateOne(
+      { _id: contribution._id, status: contribution.status },
+      {
+        $set: {
+          status: "refunded",
+          refundedAt: now,
+          updatedAt: now,
+        },
+      },
+      sessionOption,
+    );
+
+    if (contributionUpdate.matchedCount === 0) {
+      continue;
+    }
+
+    const supporter = await users.findOne({ _id: contribution.supporterId }, sessionOption);
+
+    if (!supporter) {
+      throw new ApiError(409, "REFUND_SUPPORTER_MISSING", "A supporter account required for refund was not found.");
+    }
+
+    const balanceAfter = (supporter.credits ?? 0) + contribution.amount;
+
+    await users.updateOne(
+      { _id: contribution.supporterId },
+      {
+        $inc: { credits: contribution.amount },
+        $set: { updatedAt: now },
+      },
+      sessionOption,
+    );
+    await ledger.insertOne(createRefundLedger({ contribution, campaign, now, balanceAfter }), sessionOption);
+
+    refundedCredits += contribution.amount;
+  }
+
+  if (refundedCredits > 0) {
+    await users.updateOne(
+      { _id: campaign.creatorId },
+      {
+        $inc: { "creatorBalance.lifetimeRaised": -refundedCredits },
+        $set: { updatedAt: now },
+      },
+      sessionOption,
+    );
+  }
+
+  const update = {
+    $set: {
+      status: "deleted",
+      deletedAt: now,
+      updatedAt: now,
+    },
+  };
+
+  if (moderation) {
+    update.$set.moderation = moderation;
+  }
+
+  const campaignUpdate = await campaigns.updateOne(
+    { _id: campaign._id, status: { $ne: "deleted" } },
+    update,
+    sessionOption,
+  );
+
+  if (campaignUpdate.matchedCount === 0) {
+    throw new ApiError(409, "CAMPAIGN_ALREADY_DELETED", "Campaign has already been deleted.");
+  }
+
+  return {
+    campaign: toCreatorCampaign({
+      ...campaign,
+      status: "deleted",
+      deletedAt: now,
+      updatedAt: now,
+      ...(moderation ? { moderation } : {}),
+    }),
+    refund: {
+      refundedContributions: refundableContributions.length,
+      refundedCredits,
+    },
+  };
+};
 
 export const createCampaign = async ({ database, user, input, now = new Date() }) => {
   assertFutureDeadline(input.deadline, now);
@@ -170,96 +318,161 @@ export const updateCreatorCampaign = async ({ database, user, campaignId, input,
 
 export const deleteCreatorCampaign = async ({ database, user, campaignId, now = new Date() }) =>
   runInTransaction(database, async (session) => {
+    const campaigns = database.collection("campaigns");
+    const campaign = await getOwnedCampaign({ campaigns, campaignId, user, session });
+    return softDeleteCampaignWithRefunds({ database, campaign, now, session });
+  });
+
+export const listAdminCampaigns = async ({ database, status = "pending", search, page = 1, limit = 10 }) => {
+  const campaigns = database.collection("campaigns");
+  const filter = {};
+  const skip = (page - 1) * limit;
+
+  if (status && status !== "all") {
+    filter.status = status;
+  }
+
+  if (search) {
+    const pattern = new RegExp(escapeRegex(search), "i");
+    filter.$or = [{ title: pattern }, { creatorName: pattern }, { creatorEmail: pattern }, { category: pattern }];
+  }
+
+  const [records, totalItems] = await Promise.all([
+    campaigns.find(filter).sort({ createdAt: -1, deadline: -1 }).skip(skip).limit(limit).toArray(),
+    campaigns.countDocuments(filter),
+  ]);
+  const totalPages = Math.ceil(totalItems / limit);
+
+  return {
+    data: records.map(toAdminCampaign),
+    meta: {
+      page,
+      limit,
+      totalItems,
+      totalPages,
+      hasNext: page < totalPages,
+      hasPrev: page > 1,
+    },
+  };
+};
+
+export const decideCampaignAsAdmin = async ({ database, admin, campaignId, input, now = new Date() }) =>
+  runInTransaction(database, async (session) => {
     const sessionOption = session ? { session } : undefined;
     const campaigns = database.collection("campaigns");
-    const contributions = database.collection("contributions");
-    const users = database.collection("users");
-    const ledger = database.collection("creditTransactions");
-    const campaign = await getOwnedCampaign({ campaigns, campaignId, user, session });
-    const refundableContributions = await contributions
-      .find(
-        {
-          campaignId: campaign._id,
-          status: { $in: REFUNDABLE_CONTRIBUTION_STATUSES },
-        },
-        sessionOption,
-      )
-      .toArray();
+    const notifications = database.collection("notifications");
+    const campaign = await campaigns.findOne({ _id: objectIdOrString(campaignId) }, sessionOption);
 
-    let refundedCredits = 0;
-
-    for (const contribution of refundableContributions) {
-      const contributionUpdate = await contributions.updateOne(
-        { _id: contribution._id, status: contribution.status },
-        {
-          $set: {
-            status: "refunded",
-            refundedAt: now,
-            updatedAt: now,
-          },
-        },
-        sessionOption,
-      );
-
-      if (contributionUpdate.matchedCount === 0) {
-        continue;
-      }
-
-      const supporter = await users.findOne({ _id: contribution.supporterId }, sessionOption);
-
-      if (!supporter) {
-        throw new ApiError(409, "REFUND_SUPPORTER_MISSING", "A supporter account required for refund was not found.");
-      }
-
-      const balanceAfter = (supporter.credits ?? 0) + contribution.amount;
-
-      await users.updateOne(
-        { _id: contribution.supporterId },
-        {
-          $inc: { credits: contribution.amount },
-          $set: { updatedAt: now },
-        },
-        sessionOption,
-      );
-      await ledger.insertOne(createRefundLedger({ contribution, campaign, now, balanceAfter }), sessionOption);
-
-      refundedCredits += contribution.amount;
+    if (!campaign) {
+      throw new ApiError(404, "CAMPAIGN_NOT_FOUND", "Campaign was not found.");
     }
 
-    if (refundedCredits > 0) {
-      await users.updateOne(
-        { _id: campaign.creatorId },
-        {
-          $inc: { "creatorBalance.lifetimeRaised": -refundedCredits },
-          $set: { updatedAt: now },
-        },
-        sessionOption,
-      );
+    if (campaign.status !== "pending") {
+      throw new ApiError(409, "CAMPAIGN_DECISION_CONFLICT", "Only pending campaigns can be approved or rejected.");
     }
 
-    await campaigns.updateOne(
-      { _id: campaign._id, status: { $ne: "deleted" } },
+    const moderation = {
+      action: input.decision,
+      decidedBy: objectIdOrString(admin.id),
+      decidedAt: now,
+      reason: input.reason ?? "",
+    };
+    const campaignUpdate = await campaigns.updateOne(
+      { _id: campaign._id, status: "pending" },
       {
         $set: {
-          status: "deleted",
-          deletedAt: now,
+          status: input.decision,
+          moderation,
           updatedAt: now,
         },
       },
       sessionOption,
     );
 
+    if (campaignUpdate.matchedCount === 0) {
+      throw new ApiError(409, "CAMPAIGN_DECISION_CONFLICT", "Only pending campaigns can be approved or rejected.");
+    }
+
+    await notifications.insertOne(
+      createCampaignDecisionNotification({
+        campaign,
+        decision: input.decision,
+        reason: input.reason,
+        now,
+      }),
+      sessionOption,
+    );
+
+    return toAdminCampaign({
+      ...campaign,
+      status: input.decision,
+      moderation,
+      updatedAt: now,
+    });
+  });
+
+export const suspendCampaignAsAdmin = async ({ database, admin, campaignId, reason, now = new Date() }) =>
+  runInTransaction(database, async (session) => {
+    const sessionOption = session ? { session } : undefined;
+    const campaigns = database.collection("campaigns");
+    const campaign = await getCampaignForAdmin({ campaigns, campaignId, session });
+
+    if (campaign.status === "suspended") {
+      throw new ApiError(409, "CAMPAIGN_ALREADY_SUSPENDED", "Campaign is already suspended.");
+    }
+
+    const moderation = {
+      action: "suspended",
+      decidedBy: objectIdOrString(admin.id),
+      decidedAt: now,
+      reason,
+    };
+    const campaignUpdate = await campaigns.updateOne(
+      { _id: campaign._id, status: { $ne: "deleted" } },
+      {
+        $set: {
+          status: "suspended",
+          moderation,
+          updatedAt: now,
+        },
+      },
+      sessionOption,
+    );
+
+    if (campaignUpdate.matchedCount === 0) {
+      throw new ApiError(409, "CAMPAIGN_ALREADY_DELETED", "Campaign has already been deleted.");
+    }
+
+    return toAdminCampaign({
+      ...campaign,
+      status: "suspended",
+      moderation,
+      updatedAt: now,
+    });
+  });
+
+export const deleteCampaignAsAdmin = async ({ database, admin, campaignId, reason, now = new Date() }) =>
+  runInTransaction(database, async (session) => {
+    const campaigns = database.collection("campaigns");
+    const campaign = await getCampaignForAdmin({ campaigns, campaignId, session });
+    const moderation = {
+      action: "deleted",
+      decidedBy: objectIdOrString(admin.id),
+      decidedAt: now,
+      reason: reason ?? "",
+    };
+
+    const result = await softDeleteCampaignWithRefunds({ database, campaign, now, moderation, session });
+
     return {
-      campaign: toCreatorCampaign({
+      ...result,
+      campaign: toAdminCampaign({
         ...campaign,
         status: "deleted",
+        moderation,
         deletedAt: now,
         updatedAt: now,
       }),
-      refund: {
-        refundedContributions: refundableContributions.length,
-        refundedCredits,
-      },
     };
   });
 

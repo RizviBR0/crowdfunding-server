@@ -2,9 +2,13 @@ import { getDatabase } from "../config/database.js";
 import { asyncHandler } from "../middleware/asyncHandler.js";
 import {
   createCampaign,
+  decideCampaignAsAdmin,
+  deleteCampaignAsAdmin,
   deleteCreatorCampaign,
   getTopFundedCampaigns,
+  listAdminCampaigns,
   listCreatorCampaigns,
+  suspendCampaignAsAdmin,
   updateCreatorCampaign,
 } from "../services/campaign.service.js";
 import { sendSuccess } from "../utils/apiResponse.js";
@@ -61,6 +65,52 @@ export const deleteCreatorOwnedCampaign = asyncHandler(async (request, response)
     database: getRequestDatabase(request),
     user: request.user,
     campaignId: request.validated.params.campaignId,
+  });
+
+  sendSuccess(response, 200, result);
+});
+
+export const listAdminManagedCampaigns = asyncHandler(async (request, response) => {
+  const { status, search, page, limit } = request.validated.query;
+  const result = await listAdminCampaigns({
+    database: getRequestDatabase(request),
+    status,
+    search,
+    page,
+    limit,
+  });
+
+  sendSuccess(response, 200, { campaigns: result.data }, result.meta);
+});
+
+export const decideAdminManagedCampaign = asyncHandler(async (request, response) => {
+  const campaign = await decideCampaignAsAdmin({
+    database: getRequestDatabase(request),
+    admin: request.user,
+    campaignId: request.validated.params.campaignId,
+    input: request.validated.body,
+  });
+
+  sendSuccess(response, 200, { campaign });
+});
+
+export const suspendAdminManagedCampaign = asyncHandler(async (request, response) => {
+  const campaign = await suspendCampaignAsAdmin({
+    database: getRequestDatabase(request),
+    admin: request.user,
+    campaignId: request.validated.params.campaignId,
+    reason: request.validated.body.reason,
+  });
+
+  sendSuccess(response, 200, { campaign });
+});
+
+export const deleteAdminManagedCampaign = asyncHandler(async (request, response) => {
+  const result = await deleteCampaignAsAdmin({
+    database: getRequestDatabase(request),
+    admin: request.user,
+    campaignId: request.validated.params.campaignId,
+    reason: request.validated.body.reason,
   });
 
   sendSuccess(response, 200, result);
