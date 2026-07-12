@@ -45,6 +45,35 @@ export const listCreatorCampaignsSchema = z.object({
   headers: z.object({}).passthrough(),
 });
 
+export const listPublicCampaignsSchema = z
+  .object({
+    body: z.object({}).passthrough().optional(),
+    params: z.object({}),
+    query: z.object({
+      page: z.coerce.number().int().positive().default(1),
+      limit: z.coerce.number().int().positive().max(50).default(10),
+      search: z.string().trim().max(80).optional(),
+      category: z.string().trim().max(50).optional(),
+      deadlineFrom: z.coerce.date().optional(),
+      deadlineTo: z.coerce.date().optional(),
+      goalMin: z.coerce.number().int().nonnegative().optional(),
+      goalMax: z.coerce.number().int().positive().optional(),
+    }),
+    headers: z.object({}).passthrough(),
+  })
+  .refine(({ query }) => query.goalMin == null || query.goalMax == null || query.goalMin <= query.goalMax, {
+    message: "Minimum goal cannot exceed maximum goal.",
+    path: ["query", "goalMin"],
+  })
+  .refine(
+    ({ query }) =>
+      query.deadlineFrom == null || query.deadlineTo == null || query.deadlineFrom.getTime() <= query.deadlineTo.getTime(),
+    {
+      message: "Deadline from cannot be later than deadline to.",
+      path: ["query", "deadlineFrom"],
+    },
+  );
+
 export const listAdminCampaignsSchema = z.object({
   body: z.object({}).passthrough().optional(),
   params: z.object({}),

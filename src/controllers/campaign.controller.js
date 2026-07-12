@@ -5,9 +5,11 @@ import {
   decideCampaignAsAdmin,
   deleteCampaignAsAdmin,
   deleteCreatorCampaign,
+  getPublicCampaignDetail,
   getTopFundedCampaigns,
   listAdminCampaigns,
   listCreatorCampaigns,
+  listPublicCampaigns,
   suspendCampaignAsAdmin,
   updateCreatorCampaign,
 } from "../services/campaign.service.js";
@@ -25,6 +27,27 @@ export const listTopFundedCampaigns = asyncHandler(async (request, response) => 
   });
 
   sendSuccess(response, 200, data);
+});
+
+export const listPublicDiscoverableCampaigns = asyncHandler(async (request, response) => {
+  const { page, limit, ...filters } = request.validated.query;
+  const result = await listPublicCampaigns({
+    database: getRequestDatabase(request),
+    page,
+    limit,
+    filters,
+  });
+
+  sendSuccess(response, 200, { campaigns: result.data }, result.meta);
+});
+
+export const getPublicDiscoverableCampaign = asyncHandler(async (request, response) => {
+  const campaign = await getPublicCampaignDetail({
+    database: getRequestDatabase(request),
+    campaignId: request.validated.params.campaignId,
+  });
+
+  sendSuccess(response, 200, { campaign });
 });
 
 export const createCreatorCampaign = asyncHandler(async (request, response) => {

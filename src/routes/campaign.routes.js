@@ -3,6 +3,8 @@ import { Router } from "express";
 import {
   createCreatorCampaign,
   deleteCreatorOwnedCampaign,
+  getPublicDiscoverableCampaign,
+  listPublicDiscoverableCampaigns,
   listTopFundedCampaigns,
   updateCreatorOwnedCampaign,
 } from "../controllers/campaign.controller.js";
@@ -11,12 +13,15 @@ import { validateRequest } from "../middleware/validateRequest.js";
 import {
   campaignIdSchema,
   createCampaignSchema,
+  listPublicCampaignsSchema,
   updateCampaignSchema,
 } from "../validators/campaign.validation.js";
 
 export const campaignRoutes = Router();
 
 campaignRoutes.get("/top-funded", listTopFundedCampaigns);
+campaignRoutes.get("/", validateRequest(listPublicCampaignsSchema), listPublicDiscoverableCampaigns);
+campaignRoutes.get("/:campaignId", validateRequest(campaignIdSchema), getPublicDiscoverableCampaign);
 campaignRoutes.post(
   "/",
   verifyAccessToken,

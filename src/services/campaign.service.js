@@ -32,6 +32,16 @@ const toPublicCampaignSummary = (campaign) => ({
   deadline: campaign.deadline,
 });
 
+const toPublicCampaignDetail = (campaign) => ({
+  ...toPublicCampaignSummary(campaign),
+  story: campaign.story,
+  minimumContribution: campaign.minimumContribution,
+  rewardInfo: campaign.rewardInfo,
+  status: campaign.status,
+  createdAt: campaign.createdAt,
+  updatedAt: campaign.updatedAt,
+});
+
 const toCreatorCampaign = (campaign) => ({
   id: campaign._id?.toString?.() ?? campaign.id,
   title: campaign.title,
@@ -58,6 +68,42 @@ const toAdminCampaign = (campaign) => ({
 });
 
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const createApprovedActiveCampaignFilter = ({ now, search, category, deadlineFrom, deadlineTo, goalMin, goalMax }) => {
+  const deadlineLowerBound =
+    deadlineFrom && deadlineFrom.getTime() > now.getTime() ? deadlineFrom : now;
+  const filter = {
+    status: "approved",
+    deadline: { $gte: deadlineLowerBound },
+  };
+
+  if (deadlineTo) {
+    filter.deadline.$lte = deadlineTo;
+  }
+
+  if (category) {
+    filter.category = category;
+  }
+
+  if (goalMin != null || goalMax != null) {
+    filter.fundingGoal = {};
+
+    if (goalMin != null) {
+      filter.fundingGoal.$gte = goalMin;
+    }
+
+    if (goalMax != null) {
+      filter.fundingGoal.$lte = goalMax;
+    }
+  }
+
+  if (search) {
+    const pattern = new RegExp(escapeRegex(search), "i");
+    filter.$or = [{ title: pattern }, { story: pattern }, { category: pattern }, { creatorName: pattern }];
+  }
+
+  return filter;
+};
 
 const assertFutureDeadline = (deadline, now) => {
   if (deadline.getTime() <= now.getTime()) {
@@ -475,6 +521,60 @@ export const deleteCampaignAsAdmin = async ({ database, admin, campaignId, reaso
       }),
     };
   });
+
+export const listPublicCampaigns = async ({ database, page = 1, limit = 10, filters = {}, now = new Date() }) => {
+  const campaigns = database.collection("campaigns");
+  const query = createApprovedActiveCampaignFilter({ now, ...filters });
+  const skip = (page - 1) * limit;
+
+  const [records, totalItems] = await Promise.all([
+    campaigns
+      .find(query)
+      .sort({ createdAt: -1, deadline: 1 })
+      .skip(skip)
+      .limit(limit)
+      .project({
+        _id: 1,
+        title: 1,
+        category: 1,
+        imageUrl: 1,
+        creatorName: 1,
+        fundingGoal: 1,
+        amountRaised: 1,
+        deadline: 1,
+      })
+      .toArray(),
+    campaigns.countDocuments(query),
+  ]);
+  const totalPages = Math.ceil(totalItems / limit);
+
+  return {
+    data: records.map(toPublicCampaignSummary),
+    meta: {
+      page,
+      limit,
+      totalItems,
+      totalPages,
+      hasNext: page < totalPages,
+      hasPrev: page > 1,
+    },
+  };
+};
+
+export const getPublicCampaignDetail = async ({ database, campaignId, now = new Date() }) => {
+  const campaigns = database.collection("campaigns");
+  const campaign = await campaigns.findOne({
+    _id: objectIdOrString(campaignId),
+    status: "approved",
+    deadline: { $gte: now },
+  });
+
+  if (!campaign) {
+    throw new ApiError(404, "CAMPAIGN_NOT_FOUND", "Campaign was not found.");
+  }
+
+  return toPublicCampaignDetail(campaign);
+};
 
 export const getTopFundedCampaigns = async ({ database }) => {
   const campaigns = database.collection("campaigns");
