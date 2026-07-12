@@ -11,6 +11,10 @@ const envSchema = z
     CORS_ORIGINS: z.string().trim().default("http://localhost:5173"),
     MONGODB_URI: z.string().trim().optional(),
     MONGODB_DB_NAME: z.string().trim().min(1).default("crowdfunding_platform"),
+    ADMIN_BOOTSTRAP_EMAILS: z.string().trim().default(""),
+    FIREBASE_PROJECT_ID: z.string().trim().optional(),
+    FIREBASE_CLIENT_EMAIL: z.string().trim().optional(),
+    FIREBASE_PRIVATE_KEY: z.string().optional(),
   })
   .superRefine((value, context) => {
     if (value.NODE_ENV === "production" && !value.MONGODB_URI) {
@@ -43,6 +47,12 @@ export const parseEnv = (source = process.env) => {
     corsOrigins: parsed.data.CORS_ORIGINS,
     mongoUri: parsed.data.MONGODB_URI,
     mongoDbName: parsed.data.MONGODB_DB_NAME,
+    adminBootstrapEmails: parsed.data.ADMIN_BOOTSTRAP_EMAILS.split(",")
+      .map((email) => email.trim().toLowerCase())
+      .filter(Boolean),
+    firebaseProjectId: parsed.data.FIREBASE_PROJECT_ID,
+    firebaseClientEmail: parsed.data.FIREBASE_CLIENT_EMAIL,
+    firebasePrivateKey: parsed.data.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
   };
 };
 

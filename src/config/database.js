@@ -31,6 +31,7 @@ export const connectToDatabase = async ({
   try {
     await client.connect();
     database = client.db(mongoDbName);
+    database.client = client;
     await database.command({ ping: 1 });
     status = { state: "connected", lastError: null };
     return database;

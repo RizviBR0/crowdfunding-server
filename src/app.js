@@ -21,6 +21,8 @@ const parseOriginList = (config) => {
 export const createApp = ({
   config = env,
   databaseStatusProvider = getDatabaseStatus,
+  databaseProvider,
+  firebaseAuthProvider,
   configureRoutes,
 } = {}) => {
   const app = express();
@@ -28,6 +30,12 @@ export const createApp = ({
 
   app.locals.config = config;
   app.locals.getDatabaseStatus = databaseStatusProvider;
+  if (databaseProvider) {
+    app.locals.getDatabase = databaseProvider;
+  }
+  if (firebaseAuthProvider) {
+    app.locals.getFirebaseAuth = firebaseAuthProvider;
+  }
 
   app.disable("x-powered-by");
   app.use(helmet());
