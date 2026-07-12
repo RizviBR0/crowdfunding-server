@@ -2,6 +2,7 @@ import { getDatabase } from "../config/database.js";
 import { asyncHandler } from "../middleware/asyncHandler.js";
 import {
   createCampaign,
+  createContribution,
   decideCampaignAsAdmin,
   deleteCampaignAsAdmin,
   deleteCreatorCampaign,
@@ -91,6 +92,18 @@ export const deleteCreatorOwnedCampaign = asyncHandler(async (request, response)
   });
 
   sendSuccess(response, 200, result);
+});
+
+export const createSupporterContribution = asyncHandler(async (request, response) => {
+  const result = await createContribution({
+    database: getRequestDatabase(request),
+    user: request.user,
+    campaignId: request.validated.params.campaignId,
+    input: request.validated.body,
+    idempotencyKey: request.validated.headers["idempotency-key"],
+  });
+
+  sendSuccess(response, result.replayed ? 200 : 201, { contribution: result.contribution });
 });
 
 export const listAdminManagedCampaigns = asyncHandler(async (request, response) => {

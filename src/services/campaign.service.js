@@ -67,6 +67,24 @@ const toAdminCampaign = (campaign) => ({
   moderation: campaign.moderation ?? null,
 });
 
+const toContribution = (contribution) => ({
+  id: contribution._id?.toString?.() ?? contribution.id,
+  campaignId: contribution.campaignId?.toString?.() ?? contribution.campaignId,
+  campaignTitle: contribution.campaignTitle,
+  amount: contribution.amount,
+  supporterId: contribution.supporterId?.toString?.() ?? contribution.supporterId,
+  supporterEmail: contribution.supporterEmail,
+  supporterName: contribution.supporterName,
+  creatorId: contribution.creatorId?.toString?.() ?? contribution.creatorId,
+  creatorEmail: contribution.creatorEmail,
+  creatorName: contribution.creatorName,
+  message: contribution.message ?? "",
+  status: contribution.status,
+  createdAt: contribution.createdAt,
+  decidedAt: contribution.decidedAt ?? null,
+  refundedAt: contribution.refundedAt ?? null,
+});
+
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const createApprovedActiveCampaignFilter = ({ now, search, category, deadlineFrom, deadlineTo, goalMin, goalMax }) => {
@@ -166,6 +184,50 @@ const createCampaignDecisionNotification = ({ campaign, decision, reason, now })
     reason: reason ?? "",
   },
 });
+
+const createContributionNotification = ({ contribution, campaign, now }) => ({
+  type: "contribution_created",
+  message: `${contribution.supporterName} contributed ${contribution.amount} credits to "${campaign.title}".`,
+  toUserId: campaign.creatorId,
+  toEmail: campaign.creatorEmail,
+  actionRoute: "/dashboard/creator",
+  relatedEntity: { type: "contribution", id: contribution._id },
+  eventKey: `contribution-created:${contribution._id.toString()}`,
+  readAt: null,
+  time: now,
+  metadata: {
+    campaignId: campaign._id.toString(),
+    campaignTitle: campaign.title,
+    amount: contribution.amount,
+    supporterName: contribution.supporterName,
+  },
+});
+
+const createContributionDebitLedger = ({ supporter, contribution, campaign, now, balanceAfter }) => ({
+  userId: supporter._id,
+  type: "contribution_debit",
+  amount: -contribution.amount,
+  balanceType: "credits",
+  referenceType: "contribution",
+  referenceId: contribution._id.toString(),
+  idempotencyKey: `contribution:${supporter._id.toString()}:${contribution.idempotencyKey}`,
+  balanceAfter,
+  createdAt: now,
+  metadata: {
+    campaignId: campaign._id.toString(),
+    campaignTitle: campaign.title,
+  },
+});
+
+const assertSameContributionPayload = ({ existing, campaignId, input }) => {
+  const sameCampaign = existing.campaignId?.toString?.() === objectIdOrString(campaignId)?.toString?.();
+  const sameAmount = existing.amount === input.amount;
+  const sameMessage = (existing.message ?? "") === (input.message ?? "");
+
+  if (!sameCampaign || !sameAmount || !sameMessage) {
+    throw new ApiError(409, "IDEMPOTENCY_CONFLICT", "Idempotency key was already used for a different request.");
+  }
+};
 
 const getCampaignForAdmin = async ({ campaigns, campaignId, session }) => {
   const campaign = await campaigns.findOne(
@@ -367,6 +429,157 @@ export const deleteCreatorCampaign = async ({ database, user, campaignId, now = 
     const campaigns = database.collection("campaigns");
     const campaign = await getOwnedCampaign({ campaigns, campaignId, user, session });
     return softDeleteCampaignWithRefunds({ database, campaign, now, session });
+  });
+
+export const createContribution = async ({ database, user, campaignId, input, idempotencyKey, now = new Date() }) =>
+  runInTransaction(database, async (session) => {
+    const sessionOption = session ? { session } : undefined;
+    const campaigns = database.collection("campaigns");
+    const contributions = database.collection("contributions");
+    const users = database.collection("users");
+    const ledger = database.collection("creditTransactions");
+    const notifications = database.collection("notifications");
+    const supporterId = objectIdOrString(user.id);
+    const campaignObjectId = objectIdOrString(campaignId);
+    const existing = await contributions.findOne(
+      {
+        supporterId,
+        idempotencyKey,
+      },
+      sessionOption,
+    );
+
+    if (existing) {
+      assertSameContributionPayload({ existing, campaignId, input });
+      return { contribution: toContribution(existing), replayed: true };
+    }
+
+    const campaign = await campaigns.findOne(
+      {
+        _id: campaignObjectId,
+        status: "approved",
+        deadline: { $gte: now },
+      },
+      sessionOption,
+    );
+
+    if (!campaign) {
+      throw new ApiError(404, "CAMPAIGN_NOT_FOUND", "Campaign was not found.");
+    }
+
+    if (input.amount < campaign.minimumContribution) {
+      throw new ApiError(
+        400,
+        "CONTRIBUTION_BELOW_MINIMUM",
+        `Contribution must be at least ${campaign.minimumContribution} credits.`,
+      );
+    }
+
+    const pendingContributions = await contributions
+      .find(
+        {
+          campaignId: campaign._id,
+          status: "pending",
+        },
+        sessionOption,
+      )
+      .toArray();
+    const pendingReservedCredits = pendingContributions.reduce(
+      (total, contribution) => total + (contribution.amount ?? 0),
+      0,
+    );
+    const remainingCredits = campaign.fundingGoal - (campaign.amountRaised ?? 0) - pendingReservedCredits;
+
+    if (remainingCredits <= 0) {
+      throw new ApiError(409, "CAMPAIGN_GOAL_REACHED", "This campaign has no remaining funding capacity.");
+    }
+
+    if (input.amount > remainingCredits) {
+      throw new ApiError(
+        409,
+        "CONTRIBUTION_EXCEEDS_REMAINING_GOAL",
+        `Contribution cannot exceed the remaining ${remainingCredits} credits for this campaign.`,
+      );
+    }
+
+    const supporter = await users.findOne(
+      {
+        _id: supporterId,
+        role: "supporter",
+        status: "active",
+      },
+      sessionOption,
+    );
+
+    if (!supporter) {
+      throw new ApiError(401, "USER_NOT_ACTIVE", "Authenticated supporter account is not active.");
+    }
+
+    const startingCredits = supporter.credits ?? 0;
+
+    if (startingCredits < input.amount) {
+      throw new ApiError(409, "INSUFFICIENT_CREDITS", "Supporter does not have enough credits.");
+    }
+
+    const debitResult = await users.updateOne(
+      {
+        _id: supporter._id,
+        status: "active",
+        credits: { $gte: input.amount },
+      },
+      {
+        $inc: { credits: -input.amount },
+        $set: { updatedAt: now },
+      },
+      sessionOption,
+    );
+
+    if (debitResult.matchedCount === 0) {
+      throw new ApiError(409, "INSUFFICIENT_CREDITS", "Supporter does not have enough credits.");
+    }
+
+    const contribution = {
+      campaignId: campaign._id,
+      campaignTitle: campaign.title,
+      amount: input.amount,
+      supporterId: supporter._id,
+      supporterEmail: supporter.email,
+      supporterName: supporter.displayName,
+      creatorId: campaign.creatorId,
+      creatorEmail: campaign.creatorEmail,
+      creatorName: campaign.creatorName,
+      message: input.message ?? "",
+      status: "pending",
+      idempotencyKey,
+      createdAt: now,
+      decidedAt: null,
+      decidedBy: null,
+      refundedAt: null,
+    };
+    const insertResult = await contributions.insertOne(contribution, sessionOption);
+    const insertedContribution = { ...contribution, _id: insertResult.insertedId };
+    const balanceAfter = startingCredits - input.amount;
+
+    await ledger.insertOne(
+      createContributionDebitLedger({
+        supporter,
+        contribution: insertedContribution,
+        campaign,
+        now,
+        balanceAfter,
+      }),
+      sessionOption,
+    );
+    await notifications.insertOne(
+      createContributionNotification({
+        contribution: insertedContribution,
+        campaign,
+        now,
+      }),
+      sessionOption,
+    );
+
+    return { contribution: toContribution(insertedContribution), replayed: false };
   });
 
 export const listAdminCampaigns = async ({ database, status = "pending", search, page = 1, limit = 10 }) => {

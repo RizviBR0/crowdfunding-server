@@ -2,17 +2,19 @@ import { Router } from "express";
 
 import {
   createCreatorCampaign,
+  createSupporterContribution,
   deleteCreatorOwnedCampaign,
   getPublicDiscoverableCampaign,
   listPublicDiscoverableCampaigns,
   listTopFundedCampaigns,
   updateCreatorOwnedCampaign,
 } from "../controllers/campaign.controller.js";
-import { loadActiveUser, requireCreator, verifyAccessToken } from "../middleware/auth.js";
+import { loadActiveUser, requireCreator, requireSupporter, verifyAccessToken } from "../middleware/auth.js";
 import { validateRequest } from "../middleware/validateRequest.js";
 import {
   campaignIdSchema,
   createCampaignSchema,
+  createContributionSchema,
   listPublicCampaignsSchema,
   updateCampaignSchema,
 } from "../validators/campaign.validation.js";
@@ -22,6 +24,14 @@ export const campaignRoutes = Router();
 campaignRoutes.get("/top-funded", listTopFundedCampaigns);
 campaignRoutes.get("/", validateRequest(listPublicCampaignsSchema), listPublicDiscoverableCampaigns);
 campaignRoutes.get("/:campaignId", validateRequest(campaignIdSchema), getPublicDiscoverableCampaign);
+campaignRoutes.post(
+  "/:campaignId/contributions",
+  verifyAccessToken,
+  loadActiveUser,
+  requireSupporter,
+  validateRequest(createContributionSchema),
+  createSupporterContribution,
+);
 campaignRoutes.post(
   "/",
   verifyAccessToken,

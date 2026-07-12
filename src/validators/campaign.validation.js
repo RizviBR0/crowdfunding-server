@@ -113,6 +113,24 @@ export const updateCampaignSchema = z.object({
   headers: z.object({}).passthrough(),
 });
 
+export const createContributionSchema = z.object({
+  body: z
+    .object({
+      amount: positiveInt("Contribution amount"),
+      message: z.string().trim().max(800).optional().default(""),
+    })
+    .strict(),
+  params: z.object({
+    campaignId: z.string().trim().min(1, "Campaign id is required."),
+  }),
+  query: z.object({}),
+  headers: z
+    .object({
+      "idempotency-key": z.string().trim().min(8).max(120),
+    })
+    .passthrough(),
+});
+
 export const adminCampaignDecisionSchema = z.object({
   body: z
     .object({
