@@ -7,6 +7,7 @@ import {
   decideWithdrawal,
 } from "../services/withdrawal.service.js";
 import { ApiError } from "../errors/ApiError.js";
+import { sendNotificationEmail } from "../services/email.service.js";
 
 const toObjectId = (id) => (ObjectId.isValid(id) ? new ObjectId(id) : id);
 
@@ -43,6 +44,15 @@ export const createCreatorWithdrawal = async (req, res, next) => {
     });
 
     res.status(replayed ? 200 : 201).json({ success: true, data: withdrawal });
+    if (!replayed) {
+      void sendNotificationEmail({
+        type: "withdrawal_requested",
+        toEmail: withdrawal.creatorEmail,
+        recipientName: withdrawal.creatorName,
+        message: `Your withdrawal request for ${withdrawal.withdrawalCredit} credits was received and is pending admin review.`,
+        metadata: withdrawal,
+      }).catch((error) => console.error("Withdrawal request email delivery failed.", error));
+    }
   } catch (error) {
     next(error);
   }
@@ -97,7 +107,7 @@ export const approveAdminWithdrawal = async (req, res, next) => {
       throw new ApiError(400, "IDEMPOTENCY_KEY_REQUIRED", "Idempotency-Key header is required.");
     }
 
-    const { withdrawal } = await decideWithdrawal({
+    const { withdrawal, replayed } = await decideWithdrawal({
       database,
       admin,
       withdrawalId,
@@ -106,6 +116,13 @@ export const approveAdminWithdrawal = async (req, res, next) => {
     });
 
     res.status(200).json({ success: true, data: withdrawal });
+    if (!replayed) void sendNotificationEmail({
+      type: "withdrawal_decision",
+      toEmail: withdrawal.creatorEmail,
+      recipientName: withdrawal.creatorName,
+      message: `Your withdrawal request for ${withdrawal.withdrawalCredit} credits was approved by admin.`,
+      metadata: withdrawal,
+    }).catch((error) => console.error("Withdrawal approval email delivery failed.", error));
   } catch (error) {
     next(error);
   }
@@ -122,7 +139,7 @@ export const rejectAdminWithdrawal = async (req, res, next) => {
       throw new ApiError(400, "IDEMPOTENCY_KEY_REQUIRED", "Idempotency-Key header is required.");
     }
 
-    const { withdrawal } = await decideWithdrawal({
+    const { withdrawal, replayed } = await decideWithdrawal({
       database,
       admin,
       withdrawalId,
@@ -131,6 +148,13 @@ export const rejectAdminWithdrawal = async (req, res, next) => {
     });
 
     res.status(200).json({ success: true, data: withdrawal });
+    if (!replayed) void sendNotificationEmail({
+      type: "withdrawal_decision",
+      toEmail: withdrawal.creatorEmail,
+      recipientName: withdrawal.creatorName,
+      message: `Your withdrawal request for ${withdrawal.withdrawalCredit} credits was rejected by admin.`,
+      metadata: withdrawal,
+    }).catch((error) => console.error("Withdrawal rejection email delivery failed.", error));
   } catch (error) {
     next(error);
   }

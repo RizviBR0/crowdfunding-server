@@ -19,6 +19,12 @@ const envSchema = z
     ACCESS_TOKEN_EXPIRES_IN: z.string().trim().min(1).default("1h"),
     STRIPE_SECRET_KEY: z.string().trim().optional(),
     STRIPE_WEBHOOK_SECRET: z.string().trim().optional(),
+    SMTP_HOST: z.string().trim().optional(),
+    SMTP_PORT: z.coerce.number().int().positive().default(587),
+    SMTP_SECURE: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
+    SMTP_USER: z.string().trim().optional(),
+    SMTP_PASS: z.string().optional(),
+    EMAIL_FROM: z.string().trim().min(3).optional(),
   })
   .superRefine((value, context) => {
     if (value.NODE_ENV === "production" && !value.MONGODB_URI) {
@@ -70,6 +76,12 @@ export const parseEnv = (source = process.env) => {
     accessTokenExpiresIn: parsed.data.ACCESS_TOKEN_EXPIRES_IN,
     stripeSecretKey: parsed.data.STRIPE_SECRET_KEY || "",
     stripeWebhookSecret: parsed.data.STRIPE_WEBHOOK_SECRET || "",
+    smtpHost: parsed.data.SMTP_HOST || "",
+    smtpPort: parsed.data.SMTP_PORT,
+    smtpSecure: parsed.data.SMTP_SECURE,
+    smtpUser: parsed.data.SMTP_USER || "",
+    smtpPass: parsed.data.SMTP_PASS || "",
+    emailFrom: parsed.data.EMAIL_FROM || "",
   };
 };
 

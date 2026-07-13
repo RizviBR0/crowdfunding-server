@@ -21,6 +21,7 @@ import {
   updateCreatorCampaign,
 } from "../services/campaign.service.js";
 import { sendSuccess } from "../utils/apiResponse.js";
+import { sendNotificationEmail } from "../services/email.service.js";
 
 const getRequestDatabase = (request) => {
   const databaseProvider = request.app.locals.getDatabase ?? getDatabase;
@@ -110,6 +111,15 @@ export const createSupporterContribution = asyncHandler(async (request, response
   });
 
   sendSuccess(response, result.replayed ? 200 : 201, { contribution: result.contribution });
+  if (!result.replayed) {
+    void sendNotificationEmail({
+      type: "contribution_created",
+      toEmail: result.contribution.creatorEmail,
+      recipientName: result.contribution.creatorName,
+      message: `${result.contribution.supporterName} contributed ${result.contribution.amount} credits to "${result.contribution.campaignTitle}".`,
+      metadata: result.contribution,
+    }).catch((error) => console.error("Contribution email delivery failed.", error));
+  }
 });
 
 export const listCreatorReviewContributions = asyncHandler(async (request, response) => {
@@ -144,6 +154,17 @@ export const decideCreatorReviewContribution = asyncHandler(async (request, resp
   });
 
   sendSuccess(response, 200, { contribution: result.contribution });
+  if (!result.replayed) {
+    void sendNotificationEmail({
+      type: "contribution_decision",
+      toEmail: result.contribution.supporterEmail,
+      recipientName: result.contribution.supporterName,
+      message: result.contribution.status === "approved"
+        ? `Your contribution of ${result.contribution.amount} credits to "${result.contribution.campaignTitle}" was approved.`
+        : `Your contribution of ${result.contribution.amount} credits to "${result.contribution.campaignTitle}" was rejected and refunded.`,
+      metadata: result.contribution,
+    }).catch((error) => console.error("Contribution decision email delivery failed.", error));
+  }
 });
 
 export const listAdminManagedCampaigns = asyncHandler(async (request, response) => {
@@ -168,6 +189,13 @@ export const decideAdminManagedCampaign = asyncHandler(async (request, response)
   });
 
   sendSuccess(response, 200, { campaign });
+  void sendNotificationEmail({
+    type: "campaign_decision",
+    toEmail: campaign.creatorEmail,
+    recipientName: campaign.creatorName,
+    message: `Your campaign "${campaign.title}" was ${campaign.status} by FundBloom admin.`,
+    metadata: { decision: campaign.status },
+  }).catch((error) => console.error("Campaign decision email delivery failed.", error));
 });
 
 export const suspendAdminManagedCampaign = asyncHandler(async (request, response) => {
