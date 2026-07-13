@@ -9,11 +9,14 @@ import {
   deleteCreatorCampaign,
   getCreatorContribution,
   getPublicCampaignDetail,
+  getSupporterContributionStats,
   getTopFundedCampaigns,
   listAdminCampaigns,
   listCreatorCampaigns,
   listCreatorPendingContributions,
   listPublicCampaigns,
+  listSupporterApprovedContributions,
+  listSupporterContributions,
   suspendCampaignAsAdmin,
   updateCreatorCampaign,
 } from "../services/campaign.service.js";
@@ -187,4 +190,38 @@ export const deleteAdminManagedCampaign = asyncHandler(async (request, response)
   });
 
   sendSuccess(response, 200, result);
+});
+
+export const getSupporterDashboardStats = asyncHandler(async (request, response) => {
+  const stats = await getSupporterContributionStats({
+    database: getRequestDatabase(request),
+    user: request.user,
+  });
+
+  sendSuccess(response, 200, { stats });
+});
+
+export const listSupporterDashboardApprovedContributions = asyncHandler(async (request, response) => {
+  const { page, limit } = request.validated.query;
+  const result = await listSupporterApprovedContributions({
+    database: getRequestDatabase(request),
+    user: request.user,
+    page,
+    limit,
+  });
+
+  sendSuccess(response, 200, { contributions: result.data }, result.meta);
+});
+
+export const listSupporterOwnedContributions = asyncHandler(async (request, response) => {
+  const { status, page, limit } = request.validated.query;
+  const result = await listSupporterContributions({
+    database: getRequestDatabase(request),
+    user: request.user,
+    status,
+    page,
+    limit,
+  });
+
+  sendSuccess(response, 200, { contributions: result.data }, result.meta);
 });

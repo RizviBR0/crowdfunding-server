@@ -208,3 +208,32 @@ export const adminCampaignSuspendSchema = z.object({
   query: z.object({}),
   headers: z.object({}).passthrough(),
 });
+
+export const supporterContributionStatsSchema = z.object({
+  body: z.object({}).passthrough().optional(),
+  params: z.object({}),
+  query: z.object({}),
+  headers: z.object({}).passthrough(),
+});
+
+export const listSupporterApprovedContributionsSchema = z.object({
+  body: z.object({}).passthrough().optional(),
+  params: z.object({}),
+  query: z.object({
+    page: z.coerce.number().int().positive().default(1),
+    limit: z.coerce.number().int().positive().max(50).default(10),
+  }),
+  headers: z.object({}).passthrough(),
+});
+
+export const listSupporterContributionsSchema = z.object({
+  body: z.object({}).passthrough().optional(),
+  params: z.object({}),
+  query: z.object({
+    status: z.enum(["pending", "approved", "rejected", "refunded"]).optional(),
+    page: z.coerce.number().int().positive().default(1),
+    limit: z.coerce.number().int().positive().max(50).default(10),
+  }),
+  headers: z.object({}).passthrough(),
+});
+

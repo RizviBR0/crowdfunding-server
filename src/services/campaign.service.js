@@ -1064,6 +1064,98 @@ export const getPublicCampaignDetail = async ({ database, campaignId, now = new 
   return toPublicCampaignDetail(campaign);
 };
 
+export const getSupporterContributionStats = async ({ database, user }) => {
+  const contributions = database.collection("contributions");
+  const supporterId = objectIdOrString(user.id);
+
+  const pipeline = [
+    { $match: { supporterId } },
+    {
+      $group: {
+        _id: null,
+        totalContributions: { $sum: 1 },
+        pendingContributions: {
+          $sum: { $cond: [{ $eq: ["$status", "pending"] }, 1, 0] },
+        },
+        totalApprovedAmount: {
+          $sum: {
+            $cond: [{ $eq: ["$status", "approved"] }, "$amount", 0],
+          },
+        },
+      },
+    },
+    { $project: { _id: 0 } },
+  ];
+
+  const rows = await contributions.aggregate(pipeline).toArray();
+
+  return rows[0] ?? {
+    totalContributions: 0,
+    pendingContributions: 0,
+    totalApprovedAmount: 0,
+  };
+};
+
+export const listSupporterApprovedContributions = async ({ database, user, page = 1, limit = 10 }) => {
+  const contributions = database.collection("contributions");
+  const filter = {
+    supporterId: objectIdOrString(user.id),
+    status: "approved",
+  };
+  const skip = (page - 1) * limit;
+
+  const [records, totalItems] = await Promise.all([
+    contributions.find(filter).sort({ decidedAt: -1, createdAt: -1 }).skip(skip).limit(limit).toArray(),
+    contributions.countDocuments(filter),
+  ]);
+  const totalPages = Math.ceil(totalItems / limit);
+
+  return {
+    data: records.map(toContribution),
+    meta: {
+      page,
+      limit,
+      totalItems,
+      totalPages,
+      hasNext: page < totalPages,
+      hasPrev: page > 1,
+    },
+  };
+};
+
+const VALID_CONTRIBUTION_STATUSES = ["pending", "approved", "rejected", "refunded"];
+
+export const listSupporterContributions = async ({ database, user, status, page = 1, limit = 10 }) => {
+  const contributions = database.collection("contributions");
+  const filter = {
+    supporterId: objectIdOrString(user.id),
+  };
+
+  if (status && VALID_CONTRIBUTION_STATUSES.includes(status)) {
+    filter.status = status;
+  }
+
+  const skip = (page - 1) * limit;
+
+  const [records, totalItems] = await Promise.all([
+    contributions.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).toArray(),
+    contributions.countDocuments(filter),
+  ]);
+  const totalPages = Math.ceil(totalItems / limit);
+
+  return {
+    data: records.map(toContribution),
+    meta: {
+      page,
+      limit,
+      totalItems,
+      totalPages,
+      hasNext: page < totalPages,
+      hasPrev: page > 1,
+    },
+  };
+};
+
 export const getTopFundedCampaigns = async ({ database }) => {
   const campaigns = database.collection("campaigns");
   const approvedFilter = { status: "approved" };
