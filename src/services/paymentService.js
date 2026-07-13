@@ -167,3 +167,28 @@ const processCheckoutSession = async (session, eventId) => {
     await mongoSession.endSession();
   }
 };
+
+export const getPaymentHistory = async (userId, page = 1, limit = 10) => {
+  const db = getDatabase();
+  const skip = (page - 1) * limit;
+
+  const { ObjectId } = await import("mongodb");
+  const userObjectId = new ObjectId(userId);
+
+  const filter = { supporterId: userObjectId };
+
+  const [payments, totalCount] = await Promise.all([
+    db.collection("payments").find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).toArray(),
+    db.collection("payments").countDocuments(filter),
+  ]);
+
+  return {
+    payments,
+    meta: {
+      total: totalCount,
+      page,
+      limit,
+      totalPages: Math.ceil(totalCount / limit),
+    },
+  };
+};

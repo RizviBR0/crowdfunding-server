@@ -1,4 +1,4 @@
-import { createCheckoutSession, handleStripeWebhook } from "../services/paymentService.js";
+import { createCheckoutSession, handleStripeWebhook, getPaymentHistory } from "../services/paymentService.js";
 
 export const createCheckoutSessionHandler = async (req, res, next) => {
   try {
@@ -20,6 +20,22 @@ export const stripeWebhookHandler = async (req, res, next) => {
     res.status(200).json(result);
   } catch (err) {
     // Note: webhooks should often return generic errors to Stripe, but next(err) relies on errorHandler
+    next(err);
+  }
+};
+
+export const getPaymentHistoryHandler = async (req, res, next) => {
+  try {
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 10;
+    const result = await getPaymentHistory(req.user.id, page, limit);
+
+    res.status(200).json({
+      status: "success",
+      data: { payments: result.payments },
+      meta: result.meta,
+    });
+  } catch (err) {
     next(err);
   }
 };

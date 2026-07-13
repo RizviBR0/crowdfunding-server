@@ -6,12 +6,15 @@ import { signAccessToken } from "../services/token.service.js";
 const mockCreateCheckoutSession = vi.fn();
 const mockHandleStripeWebhook = vi.fn();
 
+const mockGetPaymentHistory = vi.fn();
+
 vi.mock("../services/paymentService.js", async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...actual,
     createCheckoutSession: (...args) => mockCreateCheckoutSession(...args),
     handleStripeWebhook: (...args) => mockHandleStripeWebhook(...args),
+    getPaymentHistory: (...args) => mockGetPaymentHistory(...args),
   };
 });
 
@@ -102,6 +105,32 @@ describe("paymentRoutes", () => {
       expect(response.status).toBe(200);
       expect(response.body).toEqual({ received: true });
       expect(mockHandleStripeWebhook).toHaveBeenCalledWith("sig_123", JSON.stringify({ type: "checkout.session.completed", id: "evt_123" }));
+    });
+  });
+
+  describe("GET /api/v1/payments/history", () => {
+    it("returns 401 if unauthorized", async () => {
+      const response = await request(app).get("/api/v1/payments/history");
+      expect(response.status).toBe(401);
+    });
+
+    it("returns 200 with payment history for a supporter", async () => {
+      const token = signAccessToken({ user: { id: "user_1", email: "test@test.com" }, config: mockConfig });
+      mockFindOne.mockResolvedValueOnce({ _id: "user_1", status: "active", role: "supporter", uid: "user_1" });
+      
+      mockGetPaymentHistory.mockResolvedValueOnce({
+        payments: [{ _id: "pay_1", credits: 100 }],
+        meta: { total: 1, page: 1, limit: 10, totalPages: 1 },
+      });
+
+      const response = await request(app)
+        .get("/api/v1/payments/history?page=1&limit=10")
+        .set("Authorization", `Bearer ${token}`);
+      
+      expect(response.status).toBe(200);
+      expect(response.body.data.payments).toHaveLength(1);
+      expect(response.body.meta.total).toBe(1);
+      expect(mockGetPaymentHistory).toHaveBeenCalledWith("user_1", 1, 10);
     });
   });
 });
