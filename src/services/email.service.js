@@ -20,6 +20,7 @@ export const getEmailConfiguration = (config = env) => ({
   secure: Boolean(config.smtpSecure),
   user: config.smtpUser || "",
   from: config.emailFrom || "",
+  maxAttempts: config.emailMaxAttempts || 2,
 });
 
 const getTransporter = ({ config = env, createTransport = nodemailer.createTransport } = {}) => {
@@ -105,18 +106,28 @@ export const sendNotificationEmail = async ({
   metadata,
   config = env,
   createTransport,
+  maxAttempts = config.emailMaxAttempts || 2,
 } = {}) => {
   if (!toEmail || !isConfigured(config)) {
     return { sent: false, skipped: true, reason: "SMTP_NOT_CONFIGURED" };
   }
 
   const transporter = getTransporter({ config, createTransport });
-  await transporter.sendMail({
+  const email = {
     from: config.emailFrom,
     to: toEmail,
     ...buildNotificationEmail({ type, recipientName, message, metadata }),
-  });
-  return { sent: true, skipped: false };
+  };
+  let lastError;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await transporter.sendMail(email);
+      return { sent: true, skipped: false, attempts: attempt };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
 };
 
 export const resetEmailTransporter = () => {

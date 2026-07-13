@@ -25,6 +25,7 @@ const envSchema = z
     SMTP_USER: z.string().trim().optional(),
     SMTP_PASS: z.string().optional(),
     EMAIL_FROM: z.string().trim().min(3).optional(),
+    EMAIL_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(3).default(2),
   })
   .superRefine((value, context) => {
     if (value.NODE_ENV === "production" && !value.MONGODB_URI) {
@@ -82,6 +83,7 @@ export const parseEnv = (source = process.env) => {
     smtpUser: parsed.data.SMTP_USER || "",
     smtpPass: parsed.data.SMTP_PASS || "",
     emailFrom: parsed.data.EMAIL_FROM || "",
+    emailMaxAttempts: parsed.data.EMAIL_MAX_ATTEMPTS,
   };
 };
 

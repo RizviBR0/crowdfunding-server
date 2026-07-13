@@ -61,7 +61,7 @@ describe("email service", () => {
       message: "Your withdrawal was approved.",
       config: smtpConfig,
       createTransport,
-    })).resolves.toEqual({ sent: true, skipped: false });
+    })).resolves.toEqual({ sent: true, skipped: false, attempts: 1 });
 
     expect(createTransport).toHaveBeenCalledWith({
       host: smtpConfig.smtpHost,
@@ -74,5 +74,21 @@ describe("email service", () => {
       to: "creator@example.com",
       subject: expect.stringContaining("Withdrawal"),
     }));
+  });
+
+  it("retries a transient SMTP failure once by default", async () => {
+    const sendMail = vi.fn()
+      .mockRejectedValueOnce(new Error("temporary SMTP failure"))
+      .mockResolvedValueOnce({ messageId: "mail_2" });
+    const createTransport = vi.fn(() => ({ sendMail }));
+
+    await expect(sendNotificationEmail({
+      type: "contribution_created",
+      toEmail: "creator@example.com",
+      message: "A contribution arrived.",
+      config: smtpConfig,
+      createTransport,
+    })).resolves.toEqual({ sent: true, skipped: false, attempts: 2 });
+    expect(sendMail).toHaveBeenCalledTimes(2);
   });
 });
