@@ -39,6 +39,17 @@ describe("email service", () => {
     expect(email.html).toContain("Your campaign was approved.");
   });
 
+  it("escapes user-controlled content in HTML email bodies", () => {
+    const email = buildNotificationEmail({
+      type: "contribution_decision",
+      recipientName: "<Mina>",
+      message: "<script>alert('x')</script>",
+    });
+
+    expect(email.html).not.toContain("<script>");
+    expect(email.html).toContain("&lt;script&gt;");
+  });
+
   it("uses Nodemailer transport and sends a decision email", async () => {
     const sendMail = vi.fn().mockResolvedValue({ messageId: "mail_1" });
     const createTransport = vi.fn(() => ({ sendMail }));

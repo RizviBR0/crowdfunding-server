@@ -4,6 +4,13 @@ import { env } from "../config/env.js";
 
 let sharedTransporter;
 
+const escapeHtml = (value = "") => String(value)
+  .replaceAll("&", "&amp;")
+  .replaceAll("<", "&lt;")
+  .replaceAll(">", "&gt;")
+  .replaceAll('"', "&quot;")
+  .replaceAll("'", "&#039;");
+
 const isConfigured = (config) => Boolean(config.smtpHost && config.smtpUser && config.smtpPass && config.emailFrom);
 
 export const getEmailConfiguration = (config = env) => ({
@@ -79,10 +86,14 @@ export const buildNotificationEmail = ({ type, recipientName, message, metadata 
     actionRoute: "/dashboard",
   }));
   const content = template({ type, recipientName, message, metadata });
+  const safeIntro = escapeHtml(content.intro);
+  const safeMessage = escapeHtml(content.message);
+  const safeAction = escapeHtml(content.action);
+  const safeRoute = escapeHtml(content.actionRoute);
   return {
     subject: content.subject,
     text: `${content.intro}\n\n${content.message}\n\n${content.action}: ${content.actionRoute}`,
-    html: `<div style="font-family:Arial,sans-serif;line-height:1.6;color:#312344"><p>${content.intro}</p><p>${content.message}</p><p><a href="${content.actionRoute}">${content.action}</a></p><p>FundBloom</p></div>`,
+    html: `<div style="font-family:Arial,sans-serif;line-height:1.6;color:#312344"><p>${safeIntro}</p><p>${safeMessage}</p><p><a href="${safeRoute}">${safeAction}</a></p><p>FundBloom</p></div>`,
   };
 };
 
