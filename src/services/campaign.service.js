@@ -82,6 +82,7 @@ const toContribution = (contribution) => ({
   status: contribution.status,
   createdAt: contribution.createdAt,
   decidedAt: contribution.decidedAt ?? null,
+  decidedBy: contribution.decidedBy?.toString?.() ?? contribution.decidedBy ?? null,
   refundedAt: contribution.refundedAt ?? null,
 });
 
@@ -216,6 +217,61 @@ const createContributionDebitLedger = ({ supporter, contribution, campaign, now,
   metadata: {
     campaignId: campaign._id.toString(),
     campaignTitle: campaign.title,
+  },
+});
+
+const createContributionDecisionNotification = ({ contribution, decision, now }) => ({
+  type: "contribution_decision",
+  message:
+    decision === "approved"
+      ? `Your contribution of ${contribution.amount} credits to "${contribution.campaignTitle}" was approved by ${contribution.creatorName}.`
+      : `Your contribution of ${contribution.amount} credits to "${contribution.campaignTitle}" was rejected by ${contribution.creatorName} and refunded.`,
+  toUserId: contribution.supporterId,
+  toEmail: contribution.supporterEmail,
+  actionRoute: "/dashboard/supporter/contributions",
+  relatedEntity: { type: "contribution", id: contribution._id },
+  eventKey: `contribution-decision:${contribution._id.toString()}:${decision}`,
+  readAt: null,
+  time: now,
+  metadata: {
+    decision,
+    campaignId: contribution.campaignId.toString(),
+    campaignTitle: contribution.campaignTitle,
+    amount: contribution.amount,
+  },
+});
+
+const createContributionApprovalLedger = ({ creator, contribution, now, balanceAfter, idempotencyKey }) => ({
+  userId: creator._id,
+  type: "creator_raise",
+  amount: contribution.amount,
+  balanceType: "creator_withdrawable",
+  referenceType: "contribution",
+  referenceId: contribution._id.toString(),
+  idempotencyKey: `contribution-approval:${contribution._id.toString()}:${idempotencyKey}`,
+  balanceAfter,
+  createdAt: now,
+  metadata: {
+    campaignId: contribution.campaignId.toString(),
+    campaignTitle: contribution.campaignTitle,
+    supporterName: contribution.supporterName,
+  },
+});
+
+const createContributionRejectionLedger = ({ supporter, contribution, now, balanceAfter, idempotencyKey }) => ({
+  userId: supporter._id,
+  type: "contribution_refund",
+  amount: contribution.amount,
+  balanceType: "credits",
+  referenceType: "contribution",
+  referenceId: contribution._id.toString(),
+  idempotencyKey: `contribution-rejection:${contribution._id.toString()}:${idempotencyKey}`,
+  balanceAfter,
+  createdAt: now,
+  metadata: {
+    campaignId: contribution.campaignId.toString(),
+    campaignTitle: contribution.campaignTitle,
+    previousContributionStatus: contribution.status,
   },
 });
 
@@ -580,6 +636,225 @@ export const createContribution = async ({ database, user, campaignId, input, id
     );
 
     return { contribution: toContribution(insertedContribution), replayed: false };
+  });
+
+export const listCreatorPendingContributions = async ({ database, user, page = 1, limit = 10 }) => {
+  const contributions = database.collection("contributions");
+  const filter = {
+    creatorId: objectIdOrString(user.id),
+    status: "pending",
+  };
+  const skip = (page - 1) * limit;
+
+  const [records, totalItems] = await Promise.all([
+    contributions.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).toArray(),
+    contributions.countDocuments(filter),
+  ]);
+  const totalPages = Math.ceil(totalItems / limit);
+
+  return {
+    data: records.map(toContribution),
+    meta: {
+      page,
+      limit,
+      totalItems,
+      totalPages,
+      hasNext: page < totalPages,
+      hasPrev: page > 1,
+    },
+  };
+};
+
+export const getCreatorContribution = async ({ database, user, contributionId }) => {
+  const contribution = await database.collection("contributions").findOne({
+    _id: objectIdOrString(contributionId),
+    creatorId: objectIdOrString(user.id),
+  });
+
+  if (!contribution) {
+    throw new ApiError(404, "CONTRIBUTION_NOT_FOUND", "Contribution was not found.");
+  }
+
+  return toContribution(contribution);
+};
+
+export const decideContributionAsCreator = async ({
+  database,
+  user,
+  contributionId,
+  decision,
+  idempotencyKey,
+  now = new Date(),
+}) =>
+  runInTransaction(database, async (session) => {
+    const sessionOption = session ? { session } : undefined;
+    const campaigns = database.collection("campaigns");
+    const contributions = database.collection("contributions");
+    const users = database.collection("users");
+    const ledger = database.collection("creditTransactions");
+    const notifications = database.collection("notifications");
+    const creatorId = objectIdOrString(user.id);
+    const contributionObjectId = objectIdOrString(contributionId);
+    const contribution = await contributions.findOne(
+      {
+        _id: contributionObjectId,
+        creatorId,
+      },
+      sessionOption,
+    );
+
+    if (!contribution) {
+      throw new ApiError(404, "CONTRIBUTION_NOT_FOUND", "Contribution was not found.");
+    }
+
+    if (contribution.status !== "pending") {
+      const isReplay =
+        contribution.decisionIdempotencyKey === idempotencyKey && contribution.status === decision;
+
+      if (isReplay) {
+        return { contribution: toContribution(contribution), replayed: true };
+      }
+
+      throw new ApiError(
+        409,
+        "CONTRIBUTION_DECISION_CONFLICT",
+        "Only pending contributions can be approved or rejected.",
+      );
+    }
+
+    const campaign = await campaigns.findOne(
+      {
+        _id: contribution.campaignId,
+        creatorId,
+        status: { $ne: "deleted" },
+      },
+      sessionOption,
+    );
+
+    if (!campaign) {
+      throw new ApiError(404, "CAMPAIGN_NOT_FOUND", "Campaign was not found.");
+    }
+
+    const decisionFields = {
+      status: decision,
+      decidedAt: now,
+      decidedBy: creatorId,
+      decisionIdempotencyKey: idempotencyKey,
+      updatedAt: now,
+      ...(decision === "rejected" ? { refundedAt: now } : {}),
+    };
+
+    const contributionUpdate = await contributions.updateOne(
+      {
+        _id: contribution._id,
+        creatorId,
+        status: "pending",
+      },
+      {
+        $set: decisionFields,
+      },
+      sessionOption,
+    );
+
+    if (contributionUpdate.matchedCount === 0) {
+      throw new ApiError(
+        409,
+        "CONTRIBUTION_DECISION_CONFLICT",
+        "Only pending contributions can be approved or rejected.",
+      );
+    }
+
+    if (decision === "approved") {
+      const creator = await users.findOne(
+        {
+          _id: creatorId,
+          role: "creator",
+          status: "active",
+        },
+        sessionOption,
+      );
+
+      if (!creator) {
+        throw new ApiError(409, "CREATOR_ACCOUNT_MISSING", "Creator account required for approval was not found.");
+      }
+
+      const campaignUpdate = await campaigns.updateOne(
+        { _id: campaign._id, creatorId, status: { $ne: "deleted" } },
+        {
+          $inc: { amountRaised: contribution.amount },
+          $set: { updatedAt: now },
+        },
+        sessionOption,
+      );
+
+      if (campaignUpdate.matchedCount === 0) {
+        throw new ApiError(404, "CAMPAIGN_NOT_FOUND", "Campaign was not found.");
+      }
+
+      const creatorBalanceAfter = (creator.creatorBalance?.lifetimeRaised ?? 0) + contribution.amount;
+
+      await users.updateOne(
+        { _id: creator._id, role: "creator", status: "active" },
+        {
+          $inc: { "creatorBalance.lifetimeRaised": contribution.amount },
+          $set: { updatedAt: now },
+        },
+        sessionOption,
+      );
+      await ledger.insertOne(
+        createContributionApprovalLedger({
+          creator,
+          contribution,
+          now,
+          balanceAfter: creatorBalanceAfter,
+          idempotencyKey,
+        }),
+        sessionOption,
+      );
+    } else {
+      const supporter = await users.findOne({ _id: contribution.supporterId }, sessionOption);
+
+      if (!supporter) {
+        throw new ApiError(409, "REFUND_SUPPORTER_MISSING", "A supporter account required for refund was not found.");
+      }
+
+      const supporterBalanceAfter = (supporter.credits ?? 0) + contribution.amount;
+
+      await users.updateOne(
+        { _id: supporter._id },
+        {
+          $inc: { credits: contribution.amount },
+          $set: { updatedAt: now },
+        },
+        sessionOption,
+      );
+      await ledger.insertOne(
+        createContributionRejectionLedger({
+          supporter,
+          contribution,
+          now,
+          balanceAfter: supporterBalanceAfter,
+          idempotencyKey,
+        }),
+        sessionOption,
+      );
+    }
+
+    const decidedContribution = {
+      ...contribution,
+      ...decisionFields,
+    };
+
+    await notifications.insertOne(
+      createContributionDecisionNotification({
+        contribution: decidedContribution,
+        decision,
+        now,
+      }),
+      sessionOption,
+    );
+
+    return { contribution: toContribution(decidedContribution), replayed: false };
   });
 
 export const listAdminCampaigns = async ({ database, status = "pending", search, page = 1, limit = 10 }) => {

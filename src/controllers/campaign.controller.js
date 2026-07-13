@@ -3,13 +3,16 @@ import { asyncHandler } from "../middleware/asyncHandler.js";
 import {
   createCampaign,
   createContribution,
+  decideContributionAsCreator,
   decideCampaignAsAdmin,
   deleteCampaignAsAdmin,
   deleteCreatorCampaign,
+  getCreatorContribution,
   getPublicCampaignDetail,
   getTopFundedCampaigns,
   listAdminCampaigns,
   listCreatorCampaigns,
+  listCreatorPendingContributions,
   listPublicCampaigns,
   suspendCampaignAsAdmin,
   updateCreatorCampaign,
@@ -104,6 +107,40 @@ export const createSupporterContribution = asyncHandler(async (request, response
   });
 
   sendSuccess(response, result.replayed ? 200 : 201, { contribution: result.contribution });
+});
+
+export const listCreatorReviewContributions = asyncHandler(async (request, response) => {
+  const { page, limit } = request.validated.query;
+  const result = await listCreatorPendingContributions({
+    database: getRequestDatabase(request),
+    user: request.user,
+    page,
+    limit,
+  });
+
+  sendSuccess(response, 200, { contributions: result.data }, result.meta);
+});
+
+export const getCreatorReviewContribution = asyncHandler(async (request, response) => {
+  const contribution = await getCreatorContribution({
+    database: getRequestDatabase(request),
+    user: request.user,
+    contributionId: request.validated.params.contributionId,
+  });
+
+  sendSuccess(response, 200, { contribution });
+});
+
+export const decideCreatorReviewContribution = asyncHandler(async (request, response) => {
+  const result = await decideContributionAsCreator({
+    database: getRequestDatabase(request),
+    user: request.user,
+    contributionId: request.validated.params.contributionId,
+    decision: request.validated.body.decision,
+    idempotencyKey: request.validated.headers["idempotency-key"],
+  });
+
+  sendSuccess(response, 200, { contribution: result.contribution });
 });
 
 export const listAdminManagedCampaigns = asyncHandler(async (request, response) => {

@@ -45,6 +45,16 @@ export const listCreatorCampaignsSchema = z.object({
   headers: z.object({}).passthrough(),
 });
 
+export const listCreatorContributionsSchema = z.object({
+  body: z.object({}).passthrough().optional(),
+  params: z.object({}),
+  query: z.object({
+    page: z.coerce.number().int().positive().default(1),
+    limit: z.coerce.number().int().positive().max(50).default(10),
+  }),
+  headers: z.object({}).passthrough(),
+});
+
 export const listPublicCampaignsSchema = z
   .object({
     body: z.object({}).passthrough().optional(),
@@ -122,6 +132,32 @@ export const createContributionSchema = z.object({
     .strict(),
   params: z.object({
     campaignId: z.string().trim().min(1, "Campaign id is required."),
+  }),
+  query: z.object({}),
+  headers: z
+    .object({
+      "idempotency-key": z.string().trim().min(8).max(120),
+    })
+    .passthrough(),
+});
+
+export const creatorContributionIdSchema = z.object({
+  body: z.object({}).passthrough().optional(),
+  params: z.object({
+    contributionId: z.string().trim().min(1, "Contribution id is required."),
+  }),
+  query: z.object({}),
+  headers: z.object({}).passthrough(),
+});
+
+export const creatorContributionDecisionSchema = z.object({
+  body: z
+    .object({
+      decision: z.enum(["approved", "rejected"]),
+    })
+    .strict(),
+  params: z.object({
+    contributionId: z.string().trim().min(1, "Contribution id is required."),
   }),
   query: z.object({}),
   headers: z
