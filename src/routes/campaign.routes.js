@@ -11,6 +11,8 @@ import {
 } from "../controllers/campaign.controller.js";
 import { loadActiveUser, requireCreator, requireSupporter, verifyAccessToken } from "../middleware/auth.js";
 import { validateRequest } from "../middleware/validateRequest.js";
+import { createSupporterReport } from "../controllers/report.controller.js";
+import { createReportSchema } from "../validators/report.validation.js";
 import {
   campaignIdSchema,
   createCampaignSchema,
@@ -31,6 +33,14 @@ campaignRoutes.post(
   requireSupporter,
   validateRequest(createContributionSchema),
   createSupporterContribution,
+);
+campaignRoutes.post(
+  "/:campaignId/reports",
+  verifyAccessToken,
+  loadActiveUser,
+  requireSupporter,
+  validateRequest(createReportSchema),
+  createSupporterReport,
 );
 campaignRoutes.post(
   "/",

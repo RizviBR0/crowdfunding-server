@@ -13,6 +13,10 @@ import {
 } from "../controllers/withdrawal.controller.js";
 import { loadActiveUser, requireAdmin, verifyAccessToken } from "../middleware/auth.js";
 import { validateRequest } from "../middleware/validateRequest.js";
+import { listAdminUsers, removeAdminUser, updateAdminUserRole } from "../controllers/user.controller.js";
+import { listUsersSchema, updateUserRoleSchema, userIdSchema } from "../validators/user.validation.js";
+import { listAdminReports, resolveAdminReport } from "../controllers/report.controller.js";
+import { listReportsSchema, resolveReportSchema } from "../validators/report.validation.js";
 import {
   adminCampaignDecisionSchema,
   adminCampaignDeleteSchema,
@@ -34,6 +38,12 @@ adminRoutes.patch(
   validateRequest(adminCampaignDecisionSchema),
   decideAdminManagedCampaign,
 );
+
+adminRoutes.get("/users", validateRequest(listUsersSchema), listAdminUsers);
+adminRoutes.patch("/users/:userId/role", validateRequest(updateUserRoleSchema), updateAdminUserRole);
+adminRoutes.delete("/users/:userId", validateRequest(userIdSchema), removeAdminUser);
+adminRoutes.get("/reports", validateRequest(listReportsSchema), listAdminReports);
+adminRoutes.patch("/reports/:reportId", validateRequest(resolveReportSchema), resolveAdminReport);
 adminRoutes.patch(
   "/campaigns/:campaignId/suspend",
   validateRequest(adminCampaignSuspendSchema),
@@ -52,4 +62,3 @@ adminRoutes.patch(
   validateRequest(approveWithdrawalSchema), // Reuses idempotency-key and id validation schema
   rejectAdminWithdrawal,
 );
-

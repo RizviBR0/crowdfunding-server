@@ -8,6 +8,8 @@ import { healthRoutes } from "./health.routes.js";
 import { paymentRoutes } from "./paymentRoutes.js";
 import { supporterRoutes } from "./supporter.routes.js";
 import { withdrawalRoutes } from "./withdrawal.routes.js";
+import { notificationRoutes } from "./notification.routes.js";
+import { analyticsRoutes } from "./analytics.routes.js";
 
 export const apiRoutes = Router();
 
@@ -19,5 +21,6 @@ apiRoutes.use("/health", healthRoutes);
 apiRoutes.use("/payments", paymentRoutes);
 apiRoutes.use("/supporter", supporterRoutes);
 apiRoutes.use("/withdrawals", withdrawalRoutes);
-
+apiRoutes.use("/notifications", notificationRoutes);
+apiRoutes.use("/analytics", analyticsRoutes);
 
