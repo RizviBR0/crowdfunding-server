@@ -54,7 +54,16 @@ export const createApp = ({
       allowedHeaders: ["Content-Type", "Authorization", "Idempotency-Key"],
     }),
   );
-  app.use(express.json({ limit: "1mb" }));
+  app.use(
+    express.json({
+      limit: "1mb",
+      verify: (req, res, buf) => {
+        if (req.originalUrl.includes("/payments/stripe/webhook")) {
+          req.rawBody = buf.toString();
+        }
+      },
+    }),
+  );
 
   app.use(config.apiPrefix, apiRoutes);
 

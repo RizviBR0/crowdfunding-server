@@ -17,6 +17,8 @@ const envSchema = z
     FIREBASE_PRIVATE_KEY: z.string().optional(),
     ACCESS_TOKEN_SECRET: z.string().trim().min(16).default("development-access-token-secret"),
     ACCESS_TOKEN_EXPIRES_IN: z.string().trim().min(1).default("1h"),
+    STRIPE_SECRET_KEY: z.string().trim().optional(),
+    STRIPE_WEBHOOK_SECRET: z.string().trim().optional(),
   })
   .superRefine((value, context) => {
     if (value.NODE_ENV === "production" && !value.MONGODB_URI) {
@@ -66,6 +68,8 @@ export const parseEnv = (source = process.env) => {
     firebasePrivateKey: parsed.data.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
     accessTokenSecret: parsed.data.ACCESS_TOKEN_SECRET,
     accessTokenExpiresIn: parsed.data.ACCESS_TOKEN_EXPIRES_IN,
+    stripeSecretKey: parsed.data.STRIPE_SECRET_KEY || "",
+    stripeWebhookSecret: parsed.data.STRIPE_WEBHOOK_SECRET || "",
   };
 };
 
