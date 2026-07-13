@@ -6,6 +6,11 @@ import {
   listAdminManagedCampaigns,
   suspendAdminManagedCampaign,
 } from "../controllers/campaign.controller.js";
+import {
+  approveAdminWithdrawal,
+  listAdminWithdrawals,
+  rejectAdminWithdrawal,
+} from "../controllers/withdrawal.controller.js";
 import { loadActiveUser, requireAdmin, verifyAccessToken } from "../middleware/auth.js";
 import { validateRequest } from "../middleware/validateRequest.js";
 import {
@@ -14,6 +19,10 @@ import {
   adminCampaignSuspendSchema,
   listAdminCampaignsSchema,
 } from "../validators/campaign.validation.js";
+import {
+  approveWithdrawalSchema,
+  listAdminWithdrawalsSchema,
+} from "../validators/withdrawal.validation.js";
 
 export const adminRoutes = Router();
 
@@ -31,3 +40,16 @@ adminRoutes.patch(
   suspendAdminManagedCampaign,
 );
 adminRoutes.delete("/campaigns/:campaignId", validateRequest(adminCampaignDeleteSchema), deleteAdminManagedCampaign);
+
+adminRoutes.get("/withdrawals", validateRequest(listAdminWithdrawalsSchema), listAdminWithdrawals);
+adminRoutes.patch(
+  "/withdrawals/:withdrawalId/approve",
+  validateRequest(approveWithdrawalSchema),
+  approveAdminWithdrawal,
+);
+adminRoutes.patch(
+  "/withdrawals/:withdrawalId/reject",
+  validateRequest(approveWithdrawalSchema), // Reuses idempotency-key and id validation schema
+  rejectAdminWithdrawal,
+);
+
